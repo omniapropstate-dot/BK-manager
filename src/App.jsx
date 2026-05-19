@@ -49,6 +49,48 @@ function mesActual() {
 function mSheet(mes, anio) {
   return `${mesesC[mes-1]}_${String(anio).substring(2)}`;
 }
+
+function ultimosMeses(n = 24) {
+  const { mes, anio } = mesActual();
+  const result = [];
+  for (let i = 0; i < n; i++) {
+    let m = mes - i; let a = anio;
+    if (m <= 0) { m += 12; a -= 1; }
+    result.push(mSheet(m, a));
+  }
+  return result;
+}
+
+function sheetLabel(sheet) {
+  if (!sheet) return "";
+  const [m, a] = sheet.split("_");
+  const idx = mesesC.indexOf(m);
+  return idx >= 0 ? `${meses[idx].charAt(0).toUpperCase()+meses[idx].slice(1)} 20${a}` : sheet;
+}
+
+function useMesConDatos() {
+  const [sheet, setSheet] = useState(null);
+  useEffect(() => {
+    async function detect() {
+      const candidatos = ultimosMeses(24);
+      const { data } = await supabase
+        .from("signals")
+        .select("month_sheet")
+        .in("month_sheet", candidatos)
+        .order("id", { ascending: false })
+        .limit(1);
+      if (data && data.length > 0) {
+        setSheet(data[0].month_sheet);
+      } else {
+        const { mes, anio } = mesActual();
+        setSheet(mSheet(mes, anio));
+      }
+    }
+    detect();
+  }, []);
+  return sheet;
+}
+
 function fechaCorta(f) {
   if (!f) return "—";
   const [, m, d] = f.split("-");
@@ -122,12 +164,14 @@ function Spinner() {
 }
 
 function FiltroMes({ value, onChange }) {
-  const { mes, anio } = mesActual();
+  // Genera opciones centradas en el sheet actual
   const ops = [];
-  for (let i = 0; i < 6; i++) {
-    let m = mes - i; let a = anio;
-    if (m <= 0) { m += 12; a -= 1; }
-    ops.push({ id: mSheet(m, a), label: `${mesesC[m-1]} ${a}` });
+  const candidatos = ultimosMeses(12);
+  // Siempre mostramos los últimos 6 meses disponibles
+  for (const s of candidatos.slice(0, 6)) {
+    const [m, a] = s.split("_");
+    const idx = mesesC.indexOf(m);
+    ops.push({ id: s, label: `${mesesC[idx]} 20${a}` });
   }
   return (
     <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 16 }}>
@@ -223,11 +267,14 @@ function Login({ onLogin }) {
 function TabInicio() {
   const [d, setD]       = useState(null);
   const [loading, setL] = useState(true);
-  const { mes, anio }   = mesActual();
-  const sheet           = mSheet(mes, anio);
+  const sheet           = useMesConDatos();
 
   useEffect(() => {
+    if (!sheet) return;
     async function load() {
+      const [mStr, aStr] = sheet.split("_");
+      const mesIdx = mesesC.indexOf(mStr) + 1;
+      const anioFull = 2000 + parseInt(aStr);
       const [
         { data: activas },
         { data: miembros },
@@ -237,8 +284,8 @@ function TabInicio() {
         supabase.from("signals").select("id").eq("status", "active"),
         supabase.from("members").select("id,status,end_date"),
         supabase.from("payments").select("amount")
-          .gte("payment_date", `${anio}-${String(mes).padStart(2,"0")}-01`)
-          .lte("payment_date", `${anio}-${String(mes).padStart(2,"0")}-31`),
+          .gte("payment_date", `${anioFull}-${String(mesIdx).padStart(2,"0")}-01`)
+          .lte("payment_date", `${anioFull}-${String(mesIdx).padStart(2,"0")}-31`),
         supabase.from("signals").select("status,pnl_pct,pnl_x5").eq("month_sheet", sheet),
       ]);
 
@@ -262,9 +309,9 @@ function TabInicio() {
       setL(false);
     }
     load();
-  }, []);
+  }, [sheet]);
 
-  if (loading) return <Spinner />;
+  if (!sheet || loading) return <Spinner />;
 
   const pieData = [
     { name: "Ganadoras", value: d.ganadoras, fill: C.green },
@@ -279,7 +326,7 @@ function TabInicio() {
           Centro de <span style={{ color: C.red }}>Mando</span>
         </div>
         <div style={{ fontSize: 13, color: C.muted, marginTop: 2 }}>
-          {meses[mes-1].charAt(0).toUpperCase()+meses[mes-1].slice(1)} {anio}
+          {sheetLabel(sheet)}
         </div>
       </div>
 
@@ -310,7 +357,7 @@ function TabInicio() {
 
       {pieData.length > 0 && (
         <div style={{ background: C.bgCard, border: `1px solid ${C.border}`, borderRadius: 14, padding: "18px 16px" }}>
-          <SectionTitle>Señales {mesesC[mes-1]} {anio}</SectionTitle>
+          <SectionTitle>Señales {sheetLabel(sheet)}</SectionTitle>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-around" }}>
             <ResponsiveContainer width="45%" height={110}>
               <PieChart>
@@ -343,10 +390,15 @@ function TabSenales() {
   const [senales, setSenales] = useState([]);
   const [loading, setLoading] = useState(true);
   const [status, setStatus]   = useState("all");
-  const { mes, anio }         = mesActual();
-  const [sheet, setSheet]     = useState(mSheet(mes, anio));
+  const mesDetectado          = useMesConDatos();
+  const [sheet, setSheet]     = useState(null);
 
   useEffect(() => {
+    if (mesDetectado && !sheet) setSheet(mesDetectado);
+  }, [mesDetectado]);
+
+  useEffect(() => {
+    if (!sheet) return;
     async function load() {
       setLoading(true);
       let q = supabase.from("signals").select("*").eq("month_sheet", sheet).order("id", { ascending: false });
@@ -358,6 +410,7 @@ function TabSenales() {
     load();
   }, [status, sheet]);
 
+  if (!sheet) return <Spinner />;
   const cerradas  = senales.filter(s => ["closed_tp","closed_sl"].includes(s.status));
   const ganadoras = cerradas.filter(s => s.status === "closed_tp").length;
   const perdedoras = cerradas.filter(s => s.status === "closed_sl").length;
