@@ -1,13 +1,14 @@
 // ════════════════════════════════════════════════════════════════
 // BK MANAGER DASHBOARD — App.jsx
 // Binance Killers — Tablero BI interno
+// v2 — Visión completa multi-mes, PnL acumulado real
 // ════════════════════════════════════════════════════════════════
 
 import { useEffect, useState } from "react";
 import { createClient } from "@supabase/supabase-js";
 import {
   BarChart, Bar, PieChart, Pie, Cell,
-  XAxis, YAxis, Tooltip, ResponsiveContainer,
+  XAxis, YAxis, Tooltip, ResponsiveContainer, LineChart, Line,
 } from "recharts";
 
 const supabase = createClient(
@@ -34,7 +35,6 @@ const C = {
   blueDim:  "rgba(59,130,246,0.1)",
 };
 
-// ── HELPERS ───────────────────────────────────────────────────
 const meses  = ["enero","febrero","marzo","abril","mayo","junio","julio","agosto","septiembre","octubre","noviembre","diciembre"];
 const mesesC = ["ene","feb","mar","abr","may","jun","jul","ago","sep","oct","nov","dic"];
 
@@ -49,7 +49,12 @@ function mesActual() {
 function mSheet(mes, anio) {
   return `${mesesC[mes-1]}_${String(anio).substring(2)}`;
 }
-
+function sheetLabel(sheet) {
+  if (!sheet) return "";
+  const [m, a] = sheet.split("_");
+  const idx = mesesC.indexOf(m);
+  return idx >= 0 ? `${meses[idx].charAt(0).toUpperCase()+meses[idx].slice(1)} 20${a}` : sheet;
+}
 function ultimosMeses(n = 24) {
   const { mes, anio } = mesActual();
   const result = [];
@@ -60,37 +65,6 @@ function ultimosMeses(n = 24) {
   }
   return result;
 }
-
-function sheetLabel(sheet) {
-  if (!sheet) return "";
-  const [m, a] = sheet.split("_");
-  const idx = mesesC.indexOf(m);
-  return idx >= 0 ? `${meses[idx].charAt(0).toUpperCase()+meses[idx].slice(1)} 20${a}` : sheet;
-}
-
-function useMesConDatos() {
-  const [sheet, setSheet] = useState(null);
-  useEffect(() => {
-    async function detect() {
-      const candidatos = ultimosMeses(24);
-      const { data } = await supabase
-        .from("signals")
-        .select("month_sheet")
-        .in("month_sheet", candidatos)
-        .order("id", { ascending: false })
-        .limit(1);
-      if (data && data.length > 0) {
-        setSheet(data[0].month_sheet);
-      } else {
-        const { mes, anio } = mesActual();
-        setSheet(mSheet(mes, anio));
-      }
-    }
-    detect();
-  }, []);
-  return sheet;
-}
-
 function fechaCorta(f) {
   if (!f) return "—";
   const [, m, d] = f.split("-");
@@ -101,6 +75,24 @@ function signo(n) {
   return `${v >= 0 ? "+" : ""}${v.toFixed(1)}`;
 }
 function fmt$(n) { return `$${Number(n||0).toLocaleString()}`; }
+
+// PnL de una señal: usa last_tp_hit si tiene, 0 si no tocó nada
+function pnlEfectivo(s) {
+  if (s.status === "closed_sl") return s.pnl_pct || 0;
+  if (s.last_tp_hit > 0) return s.pnl_pct || 0;
+  return 0;
+}
+function pnlX5Efectivo(s) {
+  if (s.status === "closed_sl") return s.pnl_x5 || 0;
+  if (s.last_tp_hit > 0) return s.pnl_x5 || 0;
+  return 0;
+}
+function esGanadora(s) {
+  return s.status === "closed_tp" || (s.last_tp_hit > 0 && s.status !== "closed_sl");
+}
+function esPerdedora(s) {
+  return s.status === "closed_sl";
+}
 
 // ── COMPONENTES BASE ──────────────────────────────────────────
 
@@ -131,6 +123,7 @@ function Badge({ text, type = "default" }) {
     default: { bg: "#1a1a1a",  color: C.muted },
     expired: { bg: C.redDim,   color: C.red   },
     vence:   { bg: "rgba(245,158,11,0.1)", color: C.amber },
+    active_tp: { bg: "rgba(34,197,94,0.15)", color: C.green },
   }[type] || { bg: "#1a1a1a", color: C.muted };
   return (
     <span style={{
@@ -163,25 +156,23 @@ function Spinner() {
   );
 }
 
-function FiltroMes({ value, onChange }) {
-  // Genera opciones centradas en el sheet actual
-  const ops = [];
-  const candidatos = ultimosMeses(12);
-  // Siempre mostramos los últimos 6 meses disponibles
-  for (const s of candidatos.slice(0, 6)) {
-    const [m, a] = s.split("_");
-    const idx = mesesC.indexOf(m);
-    ops.push({ id: s, label: `${mesesC[idx]} 20${a}` });
-  }
+function FiltroMes({ value, onChange, mesesDisponibles = [] }) {
+  const lista = mesesDisponibles.length > 0 ? mesesDisponibles : ultimosMeses(6);
   return (
     <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 16 }}>
-      {ops.map(op => (
-        <button key={op.id} onClick={() => onChange(op.id)} style={{
+      <button onClick={() => onChange("all")} style={{
+        padding: "6px 12px", borderRadius: 8, fontSize: 12, fontWeight: 600,
+        border: `1px solid ${value === "all" ? C.red : C.border2}`,
+        background: value === "all" ? C.redDim : "transparent",
+        color: value === "all" ? C.red : C.muted, cursor: "pointer",
+      }}>Todos</button>
+      {lista.map(s => (
+        <button key={s} onClick={() => onChange(s)} style={{
           padding: "6px 12px", borderRadius: 8, fontSize: 12, fontWeight: 600,
-          border: `1px solid ${value === op.id ? C.red : C.border2}`,
-          background: value === op.id ? C.redDim : "transparent",
-          color: value === op.id ? C.red : C.muted, cursor: "pointer",
-        }}>{op.label}</button>
+          border: `1px solid ${value === s ? C.red : C.border2}`,
+          background: value === s ? C.redDim : "transparent",
+          color: value === s ? C.red : C.muted, cursor: "pointer",
+        }}>{sheetLabel(s)}</button>
       ))}
     </div>
   );
@@ -229,7 +220,6 @@ function Login({ onLogin }) {
           </div>
           <div style={{ fontSize: 13, color: C.muted }}>Manager Dashboard</div>
         </div>
-
         <form onSubmit={submit} style={{
           background: C.bgCard, border: `1px solid ${C.border2}`, borderRadius: 16, padding: 28,
         }}>
@@ -262,83 +252,105 @@ function Login({ onLogin }) {
 }
 
 // ════════════════════════════════════════════════════════════════
-// TAB INICIO
+// TAB INICIO — Vista BI completa
 // ════════════════════════════════════════════════════════════════
 function TabInicio() {
   const [d, setD]       = useState(null);
   const [loading, setL] = useState(true);
-  const sheet           = useMesConDatos();
 
   useEffect(() => {
-    if (!sheet) return;
     async function load() {
-      const [mStr, aStr] = sheet.split("_");
-      const mesIdx = mesesC.indexOf(mStr) + 1;
-      const anioFull = 2000 + parseInt(aStr);
+      // Traer TODAS las señales de todos los meses
       const [
-        { data: activas },
+        { data: todasSenales },
         { data: miembros },
-        { data: pagos },
-        { data: senalesMes },
+        { data: todosPageos },
       ] = await Promise.all([
-        supabase.from("signals").select("id").eq("status", "active"),
+        supabase.from("signals").select("id,status,pnl_pct,pnl_x5,last_tp_hit,month_sheet,coin").order("id"),
         supabase.from("members").select("id,status,end_date"),
-        supabase.from("payments").select("amount")
-          .gte("payment_date", `${anioFull}-${String(mesIdx).padStart(2,"0")}-01`)
-          .lte("payment_date", `${anioFull}-${String(mesIdx).padStart(2,"0")}-31`),
-        supabase.from("signals").select("status,pnl_pct,pnl_x5").eq("month_sheet", sheet),
+        supabase.from("payments").select("amount,payment_date"),
       ]);
 
-      const cerradas  = (senalesMes||[]).filter(s => ["closed_tp","closed_sl"].includes(s.status));
-      const ganadoras = cerradas.filter(s => s.status === "closed_tp");
-      const pnlMes    = cerradas.reduce((a, s) => a + (s.pnl_pct||0), 0);
-      const pnlMesX5  = cerradas.reduce((a, s) => a + (s.pnl_x5||0), 0);
-      const winrate   = cerradas.length > 0 ? (ganadoras.length / cerradas.length) * 100 : 0;
-      const ingresos  = (pagos||[]).reduce((a, p) => a + (p.amount||0), 0);
-      const hoy       = hoyISO();
-      const en7       = new Date(new Date(hoy+"T12:00:00").getTime()+7*86400000).toISOString().split("T")[0];
-      const porVencer = (miembros||[]).filter(m => m.status==="active" && m.end_date && m.end_date>=hoy && m.end_date<=en7).length;
+      const senales = todasSenales || [];
+      const pagos   = todosPageos  || [];
+
+      // Agrupar por mes
+      const porMes = {};
+      senales.forEach(s => {
+        if (!porMes[s.month_sheet]) {
+          porMes[s.month_sheet] = { sheet: s.month_sheet, senales: [] };
+        }
+        porMes[s.month_sheet].senales.push(s);
+      });
+
+      // Calcular stats por mes
+      const mesesData = Object.values(porMes).map(({ sheet, senales: ms }) => {
+        const ganadoras = ms.filter(esGanadora);
+        const perdedoras = ms.filter(esPerdedora);
+        const total = ganadoras.length + perdedoras.length;
+        const pnl   = ms.reduce((a, s) => a + pnlEfectivo(s), 0);
+        const pnlX5 = ms.reduce((a, s) => a + pnlX5Efectivo(s), 0);
+        const wr    = total > 0 ? (ganadoras.length / total) * 100 : 0;
+        return {
+          sheet, label: sheetLabel(sheet),
+          ganadoras: ganadoras.length,
+          perdedoras: perdedoras.length,
+          activas: ms.filter(s => s.status === "active").length,
+          total: ms.length,
+          pnl: parseFloat(pnl.toFixed(1)),
+          pnlX5: parseFloat(pnlX5.toFixed(1)),
+          winrate: parseFloat(wr.toFixed(1)),
+        };
+      }).sort((a, b) => a.sheet.localeCompare(b.sheet));
+
+      // KPIs globales
+      const pnlTotal   = senales.reduce((a, s) => a + pnlEfectivo(s), 0);
+      const pnlTotalX5 = senales.reduce((a, s) => a + pnlX5Efectivo(s), 0);
+      const ganTotales  = senales.filter(esGanadora).length;
+      const perTotales  = senales.filter(esPerdedora).length;
+      const wrTotal     = (ganTotales + perTotales) > 0
+        ? (ganTotales / (ganTotales + perTotales)) * 100 : 0;
+      const activasTotales = senales.filter(s => s.status === "active").length;
+
+      // Alertas vencimientos
+      const hoy = hoyISO();
+      const en7 = new Date(new Date(hoy+"T12:00:00").getTime()+7*86400000).toISOString().split("T")[0];
+      const porVencer = (miembros||[]).filter(m =>
+        m.status === "active" && m.end_date && m.end_date >= hoy && m.end_date <= en7
+      ).length;
 
       setD({
-        activas: (activas||[]).length,
-        miembrosActivos: (miembros||[]).filter(m => m.status==="active").length,
-        porVencer, pnlMes, pnlMesX5, winrate, ingresos,
-        ganadoras: ganadoras.length,
-        perdedoras: cerradas.length - ganadoras.length,
+        mesesData,
+        pnlTotal: pnlTotal.toFixed(1),
+        pnlTotalX5: pnlTotalX5.toFixed(1),
+        wrTotal: wrTotal.toFixed(1),
+        ganTotales,
+        perTotales,
+        activasTotales,
+        miembrosActivos: (miembros||[]).filter(m => m.status === "active").length,
+        porVencer,
+        totalSenales: senales.length,
       });
       setL(false);
     }
     load();
-  }, [sheet]);
+  }, []);
 
-  if (!sheet || loading) return <Spinner />;
-
-  const pieData = [
-    { name: "Ganadoras", value: d.ganadoras, fill: C.green },
-    { name: "Perdedoras", value: d.perdedoras, fill: C.red },
-    { name: "Activas", value: d.activas, fill: C.blue },
-  ].filter(x => x.value > 0);
+  if (loading) return <Spinner />;
 
   return (
     <div style={{ padding: "20px 16px 100px" }}>
+      {/* Header */}
       <div style={{ marginBottom: 22 }}>
         <div style={{ fontSize: 22, fontWeight: 800, color: C.text, letterSpacing: "-0.02em" }}>
           Centro de <span style={{ color: C.red }}>Mando</span>
         </div>
         <div style={{ fontSize: 13, color: C.muted, marginTop: 2 }}>
-          {sheetLabel(sheet)}
+          Visión general — todos los períodos
         </div>
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 16 }}>
-        <KPI label="PnL del mes" value={`${signo(d.pnlMes)}%`} color={d.pnlMes >= 0 ? C.green : C.red} />
-        <KPI label="PnL x5" value={`${signo(d.pnlMesX5)}%`} color={d.pnlMesX5 >= 0 ? C.green : C.red} />
-        <KPI label="Winrate" value={`${d.winrate.toFixed(0)}%`} color={C.amber} />
-        <KPI label="Señales activas" value={d.activas} color={C.blue} />
-        <KPI label="Miembros VIP" value={d.miembrosActivos} color={C.text} />
-        <KPI label="Ingresos mes" value={fmt$(d.ingresos)} color={C.green} />
-      </div>
-
+      {/* Alerta vencimientos */}
       {d.porVencer > 0 && (
         <div style={{
           background: "rgba(245,158,11,0.07)", border: "1px solid rgba(245,158,11,0.2)",
@@ -355,28 +367,79 @@ function TabInicio() {
         </div>
       )}
 
-      {pieData.length > 0 && (
-        <div style={{ background: C.bgCard, border: `1px solid ${C.border}`, borderRadius: 14, padding: "18px 16px" }}>
-          <SectionTitle>Señales {sheetLabel(sheet)}</SectionTitle>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-around" }}>
-            <ResponsiveContainer width="45%" height={110}>
-              <PieChart>
-                <Pie data={pieData} dataKey="value" innerRadius={28} outerRadius={48} paddingAngle={3}>
-                  {pieData.map((e,i) => <Cell key={i} fill={e.fill} />)}
-                </Pie>
-                <Tooltip {...TT} />
-              </PieChart>
-            </ResponsiveContainer>
-            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-              {pieData.map((item,i) => (
-                <div key={i} style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                  <div style={{ width: 8, height: 8, borderRadius: "50%", background: item.fill }} />
-                  <span style={{ fontSize: 12, color: C.muted }}>{item.name}</span>
-                  <span style={{ fontSize: 16, fontWeight: 800, color: item.fill, marginLeft: 4 }}>{item.value}</span>
+      {/* KPIs globales */}
+      <SectionTitle>Acumulado histórico</SectionTitle>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 20 }}>
+        <KPI label="PnL total" value={`${signo(d.pnlTotal)}%`} color={parseFloat(d.pnlTotal) >= 0 ? C.green : C.red} />
+        <KPI label="PnL total x5" value={`${signo(d.pnlTotalX5)}%`} color={parseFloat(d.pnlTotalX5) >= 0 ? C.green : C.red} />
+        <KPI label="Winrate global" value={`${d.wrTotal}%`} color={C.amber} />
+        <KPI label="Total señales" value={d.totalSenales} color={C.text} sub={`${d.ganTotales} gan · ${d.perTotales} per`} />
+        <KPI label="Señales activas" value={d.activasTotales} color={C.blue} />
+        <KPI label="Miembros VIP" value={d.miembrosActivos} color={C.green} />
+      </div>
+
+      {/* Gráfico PnL por mes */}
+      {d.mesesData.length > 0 && (
+        <div style={{ background: C.bgCard, border: `1px solid ${C.border}`, borderRadius: 14, padding: "18px 16px", marginBottom: 16 }}>
+          <SectionTitle>PnL por mes (%)</SectionTitle>
+          <ResponsiveContainer width="100%" height={160}>
+            <BarChart data={d.mesesData} margin={{ top: 0, right: 0, left: -20, bottom: 0 }}>
+              <XAxis dataKey="label" tick={{ fontSize: 10, fill: C.muted }} axisLine={false} tickLine={false}
+                tickFormatter={l => l.split(" ")[0]} />
+              <YAxis tick={{ fontSize: 10, fill: C.muted }} axisLine={false} tickLine={false} />
+              <Tooltip {...TT} formatter={(v, n) => [`${v > 0 ? "+" : ""}${v}%`, "PnL"]} />
+              <Bar dataKey="pnl" radius={[4,4,0,0]}>
+                {d.mesesData.map((e, i) => (
+                  <Cell key={i} fill={e.pnl >= 0 ? C.green : C.red} />
+                ))}
+              </Bar>
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+      )}
+
+      {/* Tabla resumen por mes */}
+      {d.mesesData.length > 0 && (
+        <div style={{ background: C.bgCard, border: `1px solid ${C.border}`, borderRadius: 14, padding: "18px 16px", marginBottom: 16 }}>
+          <SectionTitle>Resumen por mes</SectionTitle>
+          {d.mesesData.map((m, i) => (
+            <div key={m.sheet} style={{
+              display: "flex", justifyContent: "space-between", alignItems: "center",
+              padding: "12px 0",
+              borderBottom: i < d.mesesData.length - 1 ? `1px solid ${C.border}` : "none",
+            }}>
+              <div>
+                <div style={{ fontSize: 14, fontWeight: 700, color: C.text }}>{m.label}</div>
+                <div style={{ fontSize: 12, color: C.muted, marginTop: 2 }}>
+                  {m.ganadoras}✅ · {m.perdedoras}❌ · {m.activas} activas · WR {m.winrate}%
                 </div>
-              ))}
+              </div>
+              <div style={{ textAlign: "right" }}>
+                <div style={{ fontSize: 16, fontWeight: 800, color: m.pnl >= 0 ? C.green : C.red }}>
+                  {signo(m.pnl)}%
+                </div>
+                <div style={{ fontSize: 12, color: C.muted }}>
+                  {signo(m.pnlX5)}% x5
+                </div>
+              </div>
             </div>
-          </div>
+          ))}
+        </div>
+      )}
+
+      {/* Winrate por mes */}
+      {d.mesesData.length > 0 && (
+        <div style={{ background: C.bgCard, border: `1px solid ${C.border}`, borderRadius: 14, padding: "18px 16px" }}>
+          <SectionTitle>Winrate por mes (%)</SectionTitle>
+          <ResponsiveContainer width="100%" height={130}>
+            <LineChart data={d.mesesData} margin={{ top: 4, right: 8, left: -20, bottom: 0 }}>
+              <XAxis dataKey="label" tick={{ fontSize: 10, fill: C.muted }} axisLine={false} tickLine={false}
+                tickFormatter={l => l.split(" ")[0]} />
+              <YAxis tick={{ fontSize: 10, fill: C.muted }} axisLine={false} tickLine={false} domain={[0, 100]} />
+              <Tooltip {...TT} formatter={v => [`${v}%`, "Winrate"]} />
+              <Line type="monotone" dataKey="winrate" stroke={C.amber} strokeWidth={2} dot={{ fill: C.amber, r: 3 }} />
+            </LineChart>
+          </ResponsiveContainer>
         </div>
       )}
     </div>
@@ -384,43 +447,58 @@ function TabInicio() {
 }
 
 // ════════════════════════════════════════════════════════════════
-// TAB SEÑALES
+// TAB SEÑALES — Multi-mes con PnL acumulado real
 // ════════════════════════════════════════════════════════════════
 function TabSenales() {
-  const [senales, setSenales] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [status, setStatus]   = useState("all");
-  const mesDetectado          = useMesConDatos();
-  const [sheet, setSheet]     = useState(null);
+  const [senales, setSenales]   = useState([]);
+  const [todos, setTodos]       = useState([]);
+  const [loading, setLoading]   = useState(true);
+  const [status, setStatus]     = useState("all");
+  const [sheet, setSheet]       = useState("all");
+  const [mesesDisp, setMesesDisp] = useState([]);
+
+  // Cargar todos los meses disponibles una vez
+  useEffect(() => {
+    async function loadMeses() {
+      const { data } = await supabase
+        .from("signals")
+        .select("month_sheet")
+        .order("id", { ascending: false });
+      if (data) {
+        const unicos = [...new Set(data.map(s => s.month_sheet))].filter(Boolean);
+        setMesesDisp(unicos);
+      }
+    }
+    loadMeses();
+  }, []);
 
   useEffect(() => {
-    if (mesDetectado && !sheet) setSheet(mesDetectado);
-  }, [mesDetectado]);
-
-  useEffect(() => {
-    if (!sheet) return;
     async function load() {
       setLoading(true);
-      let q = supabase.from("signals").select("*").eq("month_sheet", sheet).order("id", { ascending: false });
+      let q = supabase.from("signals").select("*").order("id", { ascending: false });
+      if (sheet !== "all") q = q.eq("month_sheet", sheet);
       if (status !== "all") q = q.eq("status", status);
-      const { data } = await q.limit(50);
+      const { data } = await q.limit(100);
       setSenales(data || []);
       setLoading(false);
     }
     load();
   }, [status, sheet]);
 
-  if (!sheet) return <Spinner />;
-  const cerradas  = senales.filter(s => ["closed_tp","closed_sl"].includes(s.status));
-  const ganadoras = cerradas.filter(s => s.status === "closed_tp").length;
-  const perdedoras = cerradas.filter(s => s.status === "closed_sl").length;
-  const pnlTotal  = cerradas.reduce((a, s) => a + (s.pnl_pct||0), 0);
+  // Stats del filtro actual
+  const ganadorasFiltro  = senales.filter(esGanadora);
+  const perdedorasFiltro = senales.filter(esPerdedora);
+  const pnlFiltro        = senales.reduce((a, s) => a + pnlEfectivo(s), 0);
+  const pnlX5Filtro      = senales.reduce((a, s) => a + pnlX5Efectivo(s), 0);
+  const wrFiltro         = (ganadorasFiltro.length + perdedorasFiltro.length) > 0
+    ? (ganadorasFiltro.length / (ganadorasFiltro.length + perdedorasFiltro.length)) * 100 : 0;
 
-  function statusBadge(s, tpHit) {
-    if (s === "closed_tp") return <Badge text={`TP${tpHit||""}`} type="tp" />;
-    if (s === "closed_sl") return <Badge text="SL" type="sl" />;
-    if (s === "active")    return <Badge text="activa" type="active" />;
-    return <Badge text="pendiente" type="pending" />;
+  function statusBadge(s) {
+    if (s.status === "closed_tp") return <Badge text={`TP${s.last_tp_hit||""}`} type="tp" />;
+    if (s.status === "closed_sl") return <Badge text="SL" type="sl" />;
+    if (s.status === "active" && s.last_tp_hit > 0) return <Badge text={`activa TP${s.last_tp_hit}`} type="active_tp" />;
+    if (s.status === "active")    return <Badge text="activa" type="active" />;
+    return <Badge text="no activó" type="pending" />;
   }
 
   return (
@@ -429,14 +507,16 @@ function TabSenales() {
         Señales
       </div>
 
-      <FiltroMes value={sheet} onChange={setSheet} />
+      {/* Filtro mes */}
+      <FiltroMes value={sheet} onChange={setSheet} mesesDisponibles={mesesDisp} />
 
+      {/* Filtro status */}
       <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 16 }}>
         {[
-          { id: "all", label: "Todas" },
-          { id: "active", label: "Activas" },
-          { id: "closed_tp", label: "TP" },
-          { id: "closed_sl", label: "SL" },
+          { id: "all",           label: "Todas" },
+          { id: "active",        label: "Activas" },
+          { id: "closed_tp",     label: "TP" },
+          { id: "closed_sl",     label: "SL" },
           { id: "not_triggered", label: "No activó" },
         ].map(op => (
           <button key={op.id} onClick={() => setStatus(op.id)} style={{
@@ -448,25 +528,37 @@ function TabSenales() {
         ))}
       </div>
 
-      {!loading && cerradas.length > 0 && (
+      {/* Resumen del filtro */}
+      {!loading && senales.length > 0 && (
         <div style={{
-          display: "flex", gap: 12, marginBottom: 16,
+          display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr",
+          gap: 8, marginBottom: 16,
           background: C.bgCard, border: `1px solid ${C.border}`,
-          borderRadius: 12, padding: "12px 16px",
+          borderRadius: 12, padding: "14px 16px",
         }}>
-          <div style={{ flex: 1, textAlign: "center" }}>
+          <div style={{ textAlign: "center" }}>
             <div style={{ fontSize: 11, color: C.muted, marginBottom: 4 }}>PnL</div>
-            <div style={{ fontSize: 16, fontWeight: 800, color: pnlTotal >= 0 ? C.green : C.red }}>
-              {signo(pnlTotal)}%
+            <div style={{ fontSize: 15, fontWeight: 800, color: pnlFiltro >= 0 ? C.green : C.red }}>
+              {signo(pnlFiltro)}%
             </div>
           </div>
-          <div style={{ flex: 1, textAlign: "center" }}>
-            <div style={{ fontSize: 11, color: C.muted, marginBottom: 4 }}>Ganadoras</div>
-            <div style={{ fontSize: 16, fontWeight: 800, color: C.green }}>{ganadoras}</div>
+          <div style={{ textAlign: "center" }}>
+            <div style={{ fontSize: 11, color: C.muted, marginBottom: 4 }}>PnL x5</div>
+            <div style={{ fontSize: 15, fontWeight: 800, color: pnlX5Filtro >= 0 ? C.green : C.red }}>
+              {signo(pnlX5Filtro)}%
+            </div>
           </div>
-          <div style={{ flex: 1, textAlign: "center" }}>
-            <div style={{ fontSize: 11, color: C.muted, marginBottom: 4 }}>Perdedoras</div>
-            <div style={{ fontSize: 16, fontWeight: 800, color: C.red }}>{perdedoras}</div>
+          <div style={{ textAlign: "center" }}>
+            <div style={{ fontSize: 11, color: C.muted, marginBottom: 4 }}>WR</div>
+            <div style={{ fontSize: 15, fontWeight: 800, color: C.amber }}>
+              {wrFiltro.toFixed(0)}%
+            </div>
+          </div>
+          <div style={{ textAlign: "center" }}>
+            <div style={{ fontSize: 11, color: C.muted, marginBottom: 4 }}>Señales</div>
+            <div style={{ fontSize: 15, fontWeight: 800, color: C.text }}>
+              {senales.length}
+            </div>
           </div>
         </div>
       )}
@@ -480,15 +572,17 @@ function TabSenales() {
           )}
           {senales.map(s => (
             <div key={s.id} style={{
-              background: C.bgCard, border: `1px solid ${C.border}`,
+              background: C.bgCard,
+              border: `1px solid ${s.status === "closed_sl" ? "rgba(232,25,44,0.2)" : s.last_tp_hit > 0 ? "rgba(34,197,94,0.15)" : C.border}`,
               borderRadius: 12, padding: "14px 16px",
             }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                   <span style={{ fontSize: 12, color: C.muted }}>#{s.id}</span>
                   <span style={{ fontSize: 16, fontWeight: 800, color: C.text }}>{s.pair}</span>
+                  <span style={{ fontSize: 11, color: C.muted }}>{sheetLabel(s.month_sheet)}</span>
                 </div>
-                {statusBadge(s.status, s.last_tp_hit)}
+                {statusBadge(s)}
               </div>
               <div style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
                 <div>
@@ -501,11 +595,11 @@ function TabSenales() {
                   <div style={{ fontSize: 11, color: C.muted }}>SL</div>
                   <div style={{ fontSize: 13, fontWeight: 600, color: C.red }}>{s.sl}</div>
                 </div>
-                {(s.pnl_pct !== 0) && (
+                {pnlEfectivo(s) !== 0 && (
                   <div>
                     <div style={{ fontSize: 11, color: C.muted }}>PnL</div>
-                    <div style={{ fontSize: 13, fontWeight: 700, color: s.pnl_pct >= 0 ? C.green : C.red }}>
-                      {signo(s.pnl_pct)}% ({signo(s.pnl_x5)}% x5)
+                    <div style={{ fontSize: 13, fontWeight: 700, color: pnlEfectivo(s) >= 0 ? C.green : C.red }}>
+                      {signo(pnlEfectivo(s))}% ({signo(pnlX5Efectivo(s))}% x5)
                     </div>
                   </div>
                 )}
@@ -595,24 +689,28 @@ function TabMiembros() {
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 6 }}>
                   <div>
                     <div style={{ fontSize: 15, fontWeight: 700, color: C.text }}>{m.name}</div>
-                    {m.telegram_id && (
-                      <div style={{ fontSize: 12, color: C.muted, marginTop: 2 }}>{m.telegram_id}</div>
-                    )}
+                    {m.telegram_id && <div style={{ fontSize: 12, color: C.muted, marginTop: 2 }}>{m.telegram_id}</div>}
                   </div>
                   <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4 }}>
                     <span style={{ fontSize: 13, fontWeight: 700, color: planColor(m.plan) }}>{m.plan}</span>
                     <span style={{ fontSize: 13, fontWeight: 700, color: C.green }}>{fmt$(m.amount_paid)}</span>
                   </div>
                 </div>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
                   <div style={{ fontSize: 12, color: C.muted }}>
                     {m.end_date ? `Vence: ${fechaCorta(m.end_date)}` : "Lifetime ∞"}
+                    {m.phone && <span style={{ marginLeft: 10 }}>📱 {m.phone}</span>}
                   </div>
                   <div style={{ display: "flex", gap: 6 }}>
                     {porVencer && <Badge text="vence pronto" type="vence" />}
                     {m.status !== "active" && <Badge text={m.status} type="expired" />}
                   </div>
                 </div>
+                {m.discount > 0 && (
+                  <div style={{ fontSize: 11, color: C.amber }}>
+                    {(m.discount * 100).toFixed(0)}% descuento aplicado
+                  </div>
+                )}
               </div>
             );
           })}
@@ -638,7 +736,7 @@ function TabFinanzas() {
 
       const [{ data: pagos }, { data: pagosMes }, { data: miembros }] = await Promise.all([
         supabase.from("payments").select("amount,payment_date").gte("payment_date", desde).order("payment_date"),
-        supabase.from("payments").select("amount,plan,members(name)")
+        supabase.from("payments").select("amount,amount_base,discount,plan,members(name)")
           .gte("payment_date", `${anio}-${String(mes).padStart(2,"0")}-01`)
           .lte("payment_date", `${anio}-${String(mes).padStart(2,"0")}-31`)
           .order("payment_date", { ascending: false }),
@@ -737,9 +835,17 @@ function TabFinanzas() {
           }}>
             <div>
               <div style={{ fontSize: 14, fontWeight: 600, color: C.text }}>{p.members?.name || "—"}</div>
-              <div style={{ fontSize: 12, color: C.muted }}>{p.plan}</div>
+              <div style={{ fontSize: 12, color: C.muted }}>
+                {p.plan}
+                {p.discount > 0 && <span style={{ color: C.amber, marginLeft: 6 }}>{(p.discount*100).toFixed(0)}% desc</span>}
+              </div>
             </div>
-            <div style={{ fontSize: 15, fontWeight: 800, color: C.green }}>{fmt$(p.amount)}</div>
+            <div style={{ textAlign: "right" }}>
+              <div style={{ fontSize: 15, fontWeight: 800, color: C.green }}>{fmt$(p.amount)}</div>
+              {p.discount > 0 && p.amount_base && (
+                <div style={{ fontSize: 11, color: C.muted, textDecoration: "line-through" }}>{fmt$(p.amount_base)}</div>
+              )}
+            </div>
           </div>
         ))}
       </div>
@@ -784,7 +890,6 @@ export default function App() {
 
   return (
     <div style={{ minHeight: "100dvh", background: C.bg, maxWidth: 480, margin: "0 auto", position: "relative" }}>
-      {/* Header */}
       <div style={{
         position: "sticky", top: 0, zIndex: 100,
         background: "rgba(8,8,8,0.95)", backdropFilter: "blur(12px)",
@@ -807,12 +912,10 @@ export default function App() {
         }}>Salir</button>
       </div>
 
-      {/* Contenido */}
       <div style={{ minHeight: "calc(100dvh - 120px)" }}>
         {tabs[tab].component}
       </div>
 
-      {/* Tab bar inferior */}
       <div style={{
         position: "fixed", bottom: 0, left: "50%", transform: "translateX(-50%)",
         width: "100%", maxWidth: 480,
@@ -831,9 +934,7 @@ export default function App() {
               fontSize: 10, fontWeight: tab === i ? 700 : 400,
               color: tab === i ? C.red : C.muted, letterSpacing: "0.03em",
             }}>{t.label}</span>
-            {tab === i && (
-              <div style={{ width: 4, height: 4, borderRadius: "50%", background: C.red }} />
-            )}
+            {tab === i && <div style={{ width: 4, height: 4, borderRadius: "50%", background: C.red }} />}
           </button>
         ))}
       </div>
