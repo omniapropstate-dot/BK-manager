@@ -18,22 +18,72 @@ const supabase = createClient(
 
 // ── PALETA BK ─────────────────────────────────────────────────
 const C = {
-  bg:       "#080808",
-  bgCard:   "#0f0f0f",
-  bgCard2:  "#141414",
-  border:   "#1a1a1a",
-  border2:  "#222",
+  bg:       "#060608",
+  bgCard:   "rgba(13,13,16,0.85)",
+  bgCard2:  "rgba(18,18,22,0.8)",
+  border:   "#1a1a1f",
+  border2:  "#252530",
   text:     "#f0f0f0",
   muted:    "#666",
   dim:      "#333",
   red:      "#e8192c",
   redDim:   "rgba(232,25,44,0.12)",
+  redGlow:  "rgba(232,25,44,0.3)",
   green:    "#22c55e",
   greenDim: "rgba(34,197,94,0.1)",
   amber:    "#f59e0b",
   blue:     "#3b82f6",
   blueDim:  "rgba(59,130,246,0.1)",
+  purple:   "#a855f7",
 };
+
+// ── ANIMACIONES GLOBALES ──────────────────────────────────────
+const GLOBAL_CSS = `
+  @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&display=swap');
+  * { box-sizing: border-box; }
+  body { font-family: 'DM Sans', sans-serif !important; background: #060608 !important; margin: 0; }
+  @keyframes fadeInUp { from { opacity:0; transform:translateY(14px); } to { opacity:1; transform:translateY(0); } }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  @keyframes pulsoRojo { 0%,100% { box-shadow:0 0 0 0 rgba(232,25,44,0.4); } 50% { box-shadow:0 0 0 8px rgba(232,25,44,0); } }
+  @keyframes fondoMover { 0%,100%{ transform:translate(0,0) rotate(0deg); } 33%{ transform:translate(4%,-3%) rotate(1.5deg); } 66%{ transform:translate(-3%,4%) rotate(-1.5deg); } }
+  @keyframes flotar0 { 0%,100%{ transform:translate(0,0); } 50%{ transform:translate(22px,-32px); } }
+  @keyframes flotar1 { 0%,100%{ transform:translate(0,0); } 50%{ transform:translate(-22px,28px); } }
+  @keyframes flotar2 { 0%,100%{ transform:translate(0,0); } 33%{ transform:translate(16px,-16px); } 66%{ transform:translate(-16px,16px); } }
+  @keyframes lineaRespira { 0%,100%{ opacity:0.25; } 50%{ opacity:0.7; } }
+  @keyframes glow { 0%,100%{ box-shadow:0 0 8px rgba(232,25,44,0.3); } 50%{ box-shadow:0 0 22px rgba(232,25,44,0.65); } }
+  .tap { transition: transform 0.12s, opacity 0.12s; cursor: pointer; }
+  .tap:active { transform: scale(0.96); opacity: 0.85; }
+`;
+
+// ── FONDO ANIMADO ─────────────────────────────────────────────
+function FondoAnimado() {
+  return (
+    <div style={{ position:"fixed", inset:0, pointerEvents:"none", zIndex:0, overflow:"hidden" }}>
+      <div style={{
+        position:"absolute", top:"-50%", left:"-50%", width:"200%", height:"200%",
+        background:`radial-gradient(circle at 25% 35%, rgba(232,25,44,0.05), transparent 50%),
+                    radial-gradient(circle at 75% 65%, rgba(59,130,246,0.04), transparent 50%),
+                    radial-gradient(circle at 50% 85%, rgba(168,85,247,0.03), transparent 50%)`,
+        animation:"fondoMover 28s ease-in-out infinite",
+      }}/>
+      {[...Array(12)].map((_,i) => (
+        <div key={i} style={{
+          position:"absolute", width:2+Math.random()*2, height:2+Math.random()*2,
+          background: i%3===0?C.red:i%3===1?C.blue:C.purple,
+          borderRadius:"50%", opacity:0.08+Math.random()*0.18,
+          left:`${10+Math.random()*80}%`, top:`${10+Math.random()*80}%`,
+          animation:`flotar${i%3} ${18+Math.random()*14}s ease-in-out infinite`,
+          animationDelay:`${Math.random()*6}s`,
+        }}/>
+      ))}
+      <div style={{
+        position:"absolute", bottom:0, left:0, right:0, height:1,
+        background:`linear-gradient(90deg, transparent, rgba(232,25,44,0.35), transparent)`,
+        animation:"lineaRespira 5s ease-in-out infinite",
+      }}/>
+    </div>
+  );
+}
 
 const meses  = ["enero","febrero","marzo","abril","mayo","junio","julio","agosto","septiembre","octubre","noviembre","diciembre"];
 const mesesC = ["ene","feb","mar","abr","may","jun","jul","ago","sep","oct","nov","dic"];
@@ -96,20 +146,25 @@ function esPerdedora(s) {
 
 // ── COMPONENTES BASE ──────────────────────────────────────────
 
-function KPI({ label, value, color = C.red, sub }) {
+function KPI({ label, value, color = C.red, sub, icono, alerta, delay = 0 }) {
   return (
-    <div style={{
-      background: C.bgCard, border: `1px solid ${C.border}`,
-      borderRadius: 14, padding: "16px 18px",
-      borderTop: `2px solid ${color}`,
+    <div className="tap" style={{
+      background: "linear-gradient(135deg, rgba(13,13,16,0.9), rgba(18,18,22,0.75))",
+      backdropFilter: "blur(12px)", WebkitBackdropFilter: "blur(12px)",
+      border: `1px solid ${C.border}`, borderRadius: 14, padding: "16px 14px",
+      position: "relative", overflow: "hidden",
+      animation: `fadeInUp 0.45s ease-out ${delay}s both`,
     }}>
-      <div style={{ fontSize: 11, color: C.muted, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 8 }}>
-        {label}
+      <div style={{ position:"absolute", top:0, left:0, right:0, height:2, background:color, boxShadow:`0 0 10px ${color}55` }}/>
+      {alerta && <div style={{ position:"absolute", top:10, right:10, width:7, height:7, background:C.red, borderRadius:"50%", animation:"pulsoRojo 1.5s infinite" }}/>}
+      <div style={{ display:"flex", alignItems:"center", gap:5, marginBottom:7 }}>
+        {icono && <span style={{ fontSize:12 }}>{icono}</span>}
+        <span style={{ fontSize: 10, color: C.muted, textTransform: "uppercase", letterSpacing: "0.07em", fontWeight:700 }}>{label}</span>
       </div>
-      <div style={{ fontSize: 24, fontWeight: 800, color, letterSpacing: "-0.02em" }}>
+      <div style={{ fontSize: "clamp(18px,5vw,24px)", fontWeight: 800, color, letterSpacing: "-0.02em", lineHeight:1 }}>
         {value}
       </div>
-      {sub && <div style={{ fontSize: 12, color: C.muted, marginTop: 3 }}>{sub}</div>}
+      {sub && <div style={{ fontSize: 12, color: C.muted, marginTop: 4 }}>{sub}</div>}
     </div>
   );
 }
@@ -136,9 +191,10 @@ function Badge({ text, type = "default" }) {
 function SectionTitle({ children }) {
   return (
     <div style={{
-      fontSize: 11, fontWeight: 700, color: C.muted,
+      fontSize: 10, fontWeight: 700, color: C.muted,
       textTransform: "uppercase", letterSpacing: "0.1em",
       borderLeft: `3px solid ${C.red}`, paddingLeft: 10, marginBottom: 14,
+      textShadow: `0 0 12px ${C.redDim}`,
     }}>{children}</div>
   );
 }
@@ -202,17 +258,23 @@ function Login({ onLogin }) {
   }
 
   return (
+    <>
+    <style>{GLOBAL_CSS}</style>
     <div style={{
       minHeight: "100dvh", background: C.bg,
       display: "flex", alignItems: "center", justifyContent: "center", padding: 24,
+      position: "relative",
     }}>
-      <div style={{ width: "100%", maxWidth: 380 }}>
+      <FondoAnimado/>
+      <div style={{ width: "100%", maxWidth: 380, position:"relative", zIndex:1 }}>
         <div style={{ textAlign: "center", marginBottom: 36 }}>
           <div style={{ display: "inline-flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
             <div style={{
               width: 38, height: 38, background: C.red, borderRadius: 9,
               display: "flex", alignItems: "center", justifyContent: "center",
               fontSize: 20, fontWeight: 900, color: "#fff",
+              animation: "glow 3s ease-in-out infinite",
+              boxShadow: `0 0 20px ${C.redGlow}`,
             }}>B</div>
             <span style={{ fontSize: 21, fontWeight: 800, color: C.text, letterSpacing: "-0.02em" }}>
               Binance <span style={{ color: C.red }}>Killers</span>
@@ -221,7 +283,8 @@ function Login({ onLogin }) {
           <div style={{ fontSize: 13, color: C.muted }}>Manager Dashboard</div>
         </div>
         <form onSubmit={submit} style={{
-          background: C.bgCard, border: `1px solid ${C.border2}`, borderRadius: 16, padding: 28,
+          background: "rgba(13,13,16,0.9)", backdropFilter:"blur(20px)", WebkitBackdropFilter:"blur(20px)",
+          border: `1px solid ${C.border2}`, borderRadius: 16, padding: 28,
         }}>
           {[
             { label: "Email", type: "email", value: email, set: setEmail },
@@ -244,6 +307,7 @@ function Login({ onLogin }) {
             width: "100%", padding: 13, background: loading ? C.dim : C.red,
             border: "none", borderRadius: 10, color: "#fff",
             fontSize: 14, fontWeight: 700, cursor: loading ? "default" : "pointer", marginTop: 8,
+          boxShadow: loading ? "none" : `0 4px 20px ${C.redGlow}`,
           }}>{loading ? "Entrando..." : "Ingresar"}</button>
         </form>
       </div>
@@ -370,12 +434,12 @@ function TabInicio() {
       {/* KPIs globales */}
       <SectionTitle>Acumulado histórico</SectionTitle>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 20 }}>
-        <KPI label="PnL total" value={`${signo(d.pnlTotal)}%`} color={parseFloat(d.pnlTotal) >= 0 ? C.green : C.red} />
-        <KPI label="PnL total x5" value={`${signo(d.pnlTotalX5)}%`} color={parseFloat(d.pnlTotalX5) >= 0 ? C.green : C.red} />
-        <KPI label="Winrate global" value={`${d.wrTotal}%`} color={C.amber} />
-        <KPI label="Total señales" value={d.totalSenales} color={C.text} sub={`${d.ganTotales} gan · ${d.perTotales} per`} />
-        <KPI label="Señales activas" value={d.activasTotales} color={C.blue} />
-        <KPI label="Miembros VIP" value={d.miembrosActivos} color={C.green} />
+        <KPI label="PnL total" value={`${signo(d.pnlTotal)}%`} color={parseFloat(d.pnlTotal) >= 0 ? C.green : C.red} icono="📈" delay={0.05}/>
+        <KPI label="PnL total x5" value={`${signo(d.pnlTotalX5)}%`} color={parseFloat(d.pnlTotalX5) >= 0 ? C.green : C.red} icono="⚡" delay={0.1}/>
+        <KPI label="Winrate global" value={`${d.wrTotal}%`} color={C.amber} icono="🎯" delay={0.15}/>
+        <KPI label="Total señales" value={d.totalSenales} color={C.text} sub={`${d.ganTotales} gan · ${d.perTotales} per`} delay={0.2}/>
+        <KPI label="Señales activas" value={d.activasTotales} color={C.blue} icono="📡" delay={0.25}/>
+        <KPI label="Miembros VIP" value={d.miembrosActivos} color={C.green} icono="👥" delay={0.3}/>
       </div>
 
       {/* Gráfico PnL por mes */}
@@ -503,7 +567,7 @@ function TabSenales() {
 
   return (
     <div style={{ padding: "20px 16px 100px" }}>
-      <div style={{ fontSize: 22, fontWeight: 800, color: C.text, letterSpacing: "-0.02em", marginBottom: 20 }}>
+      <div style={{ fontSize: 22, fontWeight: 800, color: C.text, letterSpacing: "-0.02em", marginBottom: 20, animation:"fadeInUp 0.4s ease-out" }}>
         Señales
       </div>
 
@@ -572,7 +636,8 @@ function TabSenales() {
           )}
           {senales.map(s => (
             <div key={s.id} style={{
-              background: C.bgCard,
+              background: "linear-gradient(135deg,rgba(13,13,16,0.9),rgba(18,18,22,0.75))",
+              backdropFilter:"blur(10px)", WebkitBackdropFilter:"blur(10px)",
               border: `1px solid ${s.status === "closed_sl" ? "rgba(232,25,44,0.2)" : s.last_tp_hit > 0 ? "rgba(34,197,94,0.15)" : C.border}`,
               borderRadius: 12, padding: "14px 16px",
             }}>
@@ -649,7 +714,7 @@ function TabMiembros() {
 
   return (
     <div style={{ padding: "20px 16px 100px" }}>
-      <div style={{ fontSize: 22, fontWeight: 800, color: C.text, letterSpacing: "-0.02em", marginBottom: 20 }}>
+      <div style={{ fontSize: 22, fontWeight: 800, color: C.text, letterSpacing: "-0.02em", marginBottom: 20, animation:"fadeInUp 0.4s ease-out" }}>
         Miembros <span style={{ color: C.red }}>VIP</span>
       </div>
 
@@ -726,41 +791,35 @@ function TabMiembros() {
 function TabFinanzas() {
   const [d, setD]       = useState(null);
   const [loading, setL] = useState(true);
-  const { mes, anio }   = mesActual();
-
   useEffect(() => {
     async function load() {
-      const hace6 = new Date();
-      hace6.setMonth(hace6.getMonth() - 5);
-      const desde = `${hace6.getFullYear()}-${String(hace6.getMonth()+1).padStart(2,"0")}-01`;
-
-      const [{ data: pagos }, { data: pagosMes }, { data: miembros }] = await Promise.all([
-        supabase.from("payments").select("amount,payment_date").gte("payment_date", desde).order("payment_date"),
-        supabase.from("payments").select("amount,amount_base,discount,plan,members(name)")
-          .gte("payment_date", `${anio}-${String(mes).padStart(2,"0")}-01`)
-          .lte("payment_date", `${anio}-${String(mes).padStart(2,"0")}-31`)
-          .order("payment_date", { ascending: false }),
+      // Traer TODOS los pagos sin filtro de fecha — evita el 0 cuando los datos son de otro año
+      const [{ data: pagos }, { data: miembros }] = await Promise.all([
+        supabase.from("payments").select("amount,amount_base,discount,plan,payment_date,members(name)").order("payment_date", { ascending: false }),
         supabase.from("members").select("plan,amount_paid,status").eq("status", "active"),
       ]);
 
-      const porMes = {};
-      for (let i = 5; i >= 0; i--) {
-        let m = mes - i; let a = anio;
-        if (m <= 0) { m += 12; a -= 1; }
-        const key = `${a}-${String(m).padStart(2,"0")}`;
-        porMes[key] = { mes: `${mesesC[m-1]} ${String(a).substring(2)}`, total: 0 };
-      }
+      // Agrupar por mes para gráfico (usa todos los meses disponibles)
+      const porMesMap: Record<string, { mes: string; total: number }> = {};
       (pagos||[]).forEach(p => {
+        if (!p.payment_date) return;
         const key = p.payment_date.substring(0,7);
-        if (porMes[key]) porMes[key].total += p.amount || 0;
+        if (!porMesMap[key]) {
+          const [y, m] = key.split("-");
+          porMesMap[key] = { mes: `${mesesC[parseInt(m)-1]} ${y.substring(2)}`, total: 0 };
+        }
+        porMesMap[key].total += p.amount || 0;
       });
+      const chartData = Object.entries(porMesMap).sort((a,b)=>a[0].localeCompare(b[0])).map(([,v])=>v);
 
-      const chartData   = Object.values(porMes);
-      const totalMes    = (pagosMes||[]).reduce((a, p) => a + (p.amount||0), 0);
-      const porPlan     = { monthly: 0, quarterly: 0, yearly: 0, lifetime: 0 };
+      // Pagos recientes (últimos 15)
+      const pagosMes = (pagos||[]).slice(0, 15);
+      const totalMes = (pagos||[]).reduce((a, p) => a + (p.amount||0), 0);
+
+      const porPlan = { monthly: 0, quarterly: 0, yearly: 0, lifetime: 0 };
       (miembros||[]).forEach(m => { if (porPlan[m.plan] !== undefined) porPlan[m.plan]++; });
 
-      setD({ chartData, pagosMes: pagosMes||[], totalMes, porPlan });
+      setD({ chartData, pagosMes, totalMes, porPlan, totalPagos: (pagos||[]).length });
       setL(false);
     }
     load();
@@ -777,13 +836,13 @@ function TabFinanzas() {
 
   return (
     <div style={{ padding: "20px 16px 100px" }}>
-      <div style={{ fontSize: 22, fontWeight: 800, color: C.text, letterSpacing: "-0.02em", marginBottom: 20 }}>
+      <div style={{ fontSize: 22, fontWeight: 800, color: C.text, letterSpacing: "-0.02em", marginBottom: 20, animation:"fadeInUp 0.4s ease-out" }}>
         Finanzas
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 20 }}>
-        <KPI label="Ingresos este mes" value={fmt$(d.totalMes)} color={C.green} />
-        <KPI label="Pagos este mes" value={d.pagosMes.length} color={C.blue} />
+        <KPI label="Ingresos totales" value={fmt$(d.totalMes)} color={C.green} icono="💵" delay={0.05}/>
+        <KPI label="Total pagos" value={d.totalPagos || d.pagosMes.length} color={C.blue} icono="📊" delay={0.1}/>
       </div>
 
       <div style={{ background: C.bgCard, border: `1px solid ${C.border}`, borderRadius: 14, padding: "18px 16px", marginBottom: 16 }}>
@@ -824,9 +883,9 @@ function TabFinanzas() {
       )}
 
       <div style={{ background: C.bgCard, border: `1px solid ${C.border}`, borderRadius: 14, padding: "18px 16px" }}>
-        <SectionTitle>Pagos recientes</SectionTitle>
+        <SectionTitle>Últimos pagos registrados</SectionTitle>
         {d.pagosMes.length === 0 && (
-          <div style={{ textAlign: "center", padding: "20px 0", color: C.muted, fontSize: 13 }}>Sin pagos este mes</div>
+          <div style={{ textAlign: "center", padding: "20px 0", color: C.muted, fontSize: 13 }}>Sin pagos registrados</div>
         )}
         {d.pagosMes.map((p, i) => (
           <div key={i} style={{
@@ -850,6 +909,7 @@ function TabFinanzas() {
         ))}
       </div>
     </div>
+    </>
   );
 }
 
@@ -889,7 +949,10 @@ export default function App() {
   ];
 
   return (
+    <>
+    <style>{GLOBAL_CSS}</style>
     <div style={{ minHeight: "100dvh", background: C.bg, maxWidth: 480, margin: "0 auto", position: "relative" }}>
+      <FondoAnimado/>
       <div style={{
         position: "sticky", top: 0, zIndex: 100,
         background: "rgba(8,8,8,0.95)", backdropFilter: "blur(12px)",
@@ -901,6 +964,7 @@ export default function App() {
             width: 28, height: 28, background: C.red, borderRadius: 6,
             display: "flex", alignItems: "center", justifyContent: "center",
             fontSize: 14, fontWeight: 900, color: "#fff",
+            boxShadow: `0 0 10px ${C.redGlow}`,
           }}>B</div>
           <span style={{ fontSize: 15, fontWeight: 800, color: C.text, letterSpacing: "-0.01em" }}>
             BK <span style={{ color: C.red }}>Manager</span>
@@ -934,10 +998,11 @@ export default function App() {
               fontSize: 10, fontWeight: tab === i ? 700 : 400,
               color: tab === i ? C.red : C.muted, letterSpacing: "0.03em",
             }}>{t.label}</span>
-            {tab === i && <div style={{ width: 4, height: 4, borderRadius: "50%", background: C.red }} />}
+            {tab === i && <div style={{ width: 4, height: 4, borderRadius: "50%", background: C.red, boxShadow: "0 0 6px #e8192c" }} />}
           </button>
         ))}
       </div>
-    </div>
+      </div>
+    </>
   );
 }
